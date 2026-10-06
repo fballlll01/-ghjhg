@@ -1,0 +1,11 @@
+services:
+  - type: web
+    runtime: static
+    name: game-shelf
+    buildCommand: sh build.sh
+    staticPublishPath: dist
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: DRIVE_FOLDER_ID
+        sync: false
