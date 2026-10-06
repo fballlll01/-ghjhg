@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game Shelf</title>
+<style>
+:root{--bg:#1f1f23;--panel:#2a2a30;--line:#3b3b44;--text:#f2f2f4;--dim:#a0a0ab;--accent:#fa5c5c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;background:#18181b;border-bottom:1px solid var(--line)}
+#brand{margin:0;flex:1;font-size:19px;font-weight:700}
+#brand span{color:var(--accent)}
+button{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 14px;cursor:pointer}
+button:hover,button:focus-visible{border-color:var(--accent);outline:none}
+button.go{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+main{max-width:1100px;margin:0 auto;padding:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px}
+.card{display:block;width:100%;padding:0;overflow:hidden;text-align:left}
+.thumb{aspect-ratio:16/10;display:grid;place-items:center;font-size:42px;font-weight:800;color:#ffffffcc}
+.meta{display:block;padding:10px 12px}
+.meta b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta small,.dim{color:var(--dim)}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.bar h2{margin:0;flex:1;font-size:20px}
+.stage{width:100%;height:calc(100vh - 150px);min-height:360px;background:#000;border-radius:4px;overflow:hidden}
+.stage iframe{display:block;width:100%;height:100%;border:0}
+.msg{padding:20px 24px;background:var(--panel);border:1px solid var(--line);border-radius:4px}
+.msg h3{margin:0 0 6px}
+code{background:#111;padding:1px 6px;border-radius:3px}
+</style>
+</head>
+<body>
+<header><h1 id="brand"></h1><button id="refresh">Refresh list</button></header>
+<main id="app"></main>
+<script>
+// ====== EDIT THESE TWO LINES (plus the title if you like) ======
+const CONFIG = {
+  title: "Game Shelf",
+  apiKey: "PASTE_YOUR_GOOGLE_API_KEY",
+  folderId: "PASTE_YOUR_DRIVE_FOLDER_ID"
+};
+// ================================================================
+
+const $ = s => document.querySelector(s), app = $('#app');
+const API = 'https://www.googleapis.com/drive/v3/files';
+const esc = s => String(s).replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';');
+const pretty = n => n.replace(/\.html?$/i, '').replace(/[_-]+/g, ' ').trim();
+const hue = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 0);
+const note = (h, p) => app.innerHTML = `<div class="msg"><h3>${h}</h3><p>${p}</p></div>`;
+let games = [], blobUrl;
+
+document.title = CONFIG.title;
+$('#brand').innerHTML = '<a href="#" style="color:inherit;text-decoration:none"><span>▶</span> ' + esc(CONFIG.title) + '</a>';
+$('#refresh').onclick = () => load(true);
+addEventListener('hashchange', () => load());
+
+async function drive(url) {
+  const r = await fetch(url);
+  if (r.ok) return r;
+  let d = ''; try { d = (await r.json()).error.message } catch {}
+  const tip = {
+    403: 'Check that the Drive API is enabled and the key allows this site.',
+    404: 'Check that the folder or file is shared as "Anyone with the link".'
+  }[r.status] || '';
+  throw new Error(`Google Drive replied ${r.status}. ${d} ${tip}`);
+}
+
+async function load(force) {
+  if (CONFIG.apiKey.includes('PASTE') || CONFIG.folderId.includes('PASTE'))
+    return note('Finish setup', 'Open <code>index.html</code> and fill in <code>apiKey</code> and <code>folderId</code> at the top of the script.');
+  if (force || !games.length) {
+    note('Loading', 'Fetching your games from Google Drive…');
+    try {
+      const q = encodeURIComponent(`'${CONFIG.folderId}' in parents and trashed=false`);
+      const r = await drive(`${API}?q=${q}&orderBy=name&pageSize=200&fields=files(id,name,mimeType,modifiedTime)&key=${CONFIG.apiKey}`);
+      games = (await r.json()).files.filter(f => /\.html?$/i.test(f.name) || f.mimeType === 'text/html');
+    } catch (e) { return note('Could not load the folder', esc(e.message)) }
+  }
+  route();
+}
+
+function route() {
+  const m = location.hash.match(/^#\/play\/([\w-]+)$/);
+  $('#refresh').hidden = !!m;
+  m ? play(m[1]) : library();
+}
+
+function library() {
+  if (!games.length) return note('No games yet', 'Put <code>.html</code> files in your Drive folder, then press Refresh list.');
+  app.innerHTML = '<div class="grid">' + games.map(g => {
+    const t = pretty(g.name), ini = t.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    return `<button class="card" data-id="${esc(g.id)}"><span class="thumb" style="background:hsl(${hue(g.id)} 45% 30%)">${esc(ini)}</span><span class="meta"><b>${esc(t)}</b><small>Updated ${new Date(g.modifiedTime).toLocaleDateString()}</small></span></button>`;
+  }).join('') + '</div>';
+  app.querySelectorAll('.card').forEach(c => c.onclick = () => location.hash = '#/play/' + c.dataset.id);
+}
+
+async function play(id) {
+  const g = games.find(x => x.id === id);
+  if (!g) { location.hash = ''; return }
+  app.innerHTML = `<div class="bar"><button id="back">Back to library</button><h2>${esc(pretty(g.name))}</h2><button id="again">Restart</button><button class="go" id="full">Fullscreen</button></div><div class="stage" id="stage"><p class="dim" style="padding:20px">Loading game…</p></div>`;
+  $('#back').onclick = () => location.hash = '';
+  try {
+    const raw = await (await drive(`${API}/${id}?alt=media&key=${CONFIG.apiKey}`)).text();
+    if (!location.hash.endsWith(id)) return;
+    const html = wrap(raw, id);
+    const start = () => {
+      URL.revokeObjectURL(blobUrl);
+      blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      const f = document.createElement('iframe');
+      f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-forms allow-modals allow-downloads');
+      f.allow = 'fullscreen; autoplay; gamepad; clipboard-write';
+      f.title = g.name;
+      f.onload = () => f.contentWindow.focus();
+      f.src = blobUrl;
+      $('#stage').replaceChildren(f);
+    };
+    $('#again').onclick = start;
+    $('#full').onclick = () => $('#stage').requestFullscreen?.();
+    start();
+  } catch (e) { if (location.hash.endsWith(id)) note('Could not load this game', esc(e.message)) }
+}
+
+// Gives every game its own private localStorage namespace, so saves from
+// different games never overwrite each other.
+function wrap(html, id) {
+  const shim = `<script>try{(()=>{const P=${JSON.stringify('gs:' + id + ':')},S=localStorage,
+ks=()=>{const o=[];for(let i=0;i<S.length;i++){const k=S.key(i);if(k.startsWith(P))o.push(k.slice(P.length))}return o},
+m={getItem:k=>S.getItem(P+k),setItem:(k,v)=>S.setItem(P+k,v),removeItem:k=>S.removeItem(P+k),clear:()=>ks().forEach(k=>S.removeItem(P+k)),key:i=>ks()[i]??null};
+Object.defineProperty(window,'localStorage',{configurable:true,value:new Proxy({},{
+get:(_,k)=>k==='length'?ks().length:k in m?m[k]:S.getItem(P+String(k))??undefined,
+set:(_,k,v)=>(S.setItem(P+k,v),true),
+deleteProperty:(_,k)=>(S.removeItem(P+k),true),
+has:(_,k)=>S.getItem(P+String(k))!==null,
+ownKeys:ks,
+getOwnPropertyDescriptor:(_,k)=>{const v=S.getItem(P+String(k));return v===null?undefined:{value:v,enumerable:true,configurable:true,writable:true}}})})})()}catch(e){}<\/script>`;
+  const head = /<head(\s[^>]*)?>/i;
+  return head.test(html) ? html.replace(head, m => m + shim) : '<!DOCTYPE html>' + shim + html;
+}
+
+load();
+</script>
+</body>
+</html>
